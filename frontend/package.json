@@ -1,0 +1,1 @@
+{"name":"calorie-frontend","version":"0.1.0","private":true,"dependencies":{"crypto-browserify":"^3.12.1","react":"18.2.0","react-dom":"18.2.0","vite":"4.0.0"},"scripts":{"dev":"vite","build":"vite build","preview":"vite preview"}}
