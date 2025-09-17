@@ -16,7 +16,6 @@ import torch
 extractor = AutoImageProcessor.from_pretrained("Kaludi/food-category-classification-v2.0")
 model = AutoModelForImageClassification.from_pretrained("Kaludi/food-category-classification-v2.0")
 #model = SiglipForImageClassification.from_pretrained(MODEL_NAME)
-#extractor = AutoImageProcessor.from_pretrained(MODEL_NAME, use_auth_token="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")
 #extractor = AutoFeatureExtractor.from_pretrained(MODEL_NAME)
 #model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
 
