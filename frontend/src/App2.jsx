@@ -1,87 +1,90 @@
-import React, { useState } from 'react'
+import React from "react";
+import { useState } from "react";
 
 
-export default function App() {
-const [file, setFile] = useState(null)
-const [preview, setPreview] = useState(null)
-const [result, setResult] = useState(null)
-const [loading, setLoading] = useState(false)
-const [error, setError] = useState(null)
+function App() {
+  const [file, setFile] = useState(null);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
+  // URL бэкенда (берётся из .env или Vite env)
+  const API_URL = import.meta.env.VITE_API_URL || "http://130.61.57.107:8000";
 
-function handleFile(e) {
-const f = e.target.files[0]
-if (!f) return
-setFile(f)
-setPreview(URL.createObjectURL(f))
-setResult(null)
-setError(null)
+  const handleFileChange = (e) => {
+    setFile(e.target.files[0]);
+    setResult(null);
+    setError(null);
+  };
+
+  const handleAnalyze = async () => {
+    if (!file) {
+      alert("Выберите изображение еды!");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch(`${API_URL}/analyze`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ошибка сервера: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 p-6">
+      <h1 className="text-3xl font-bold mb-6">🍏 Zenbody – Анализ еды</h1>
+
+      <input
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="mb-4"
+      />
+
+      <button
+        onClick={handleAnalyze}
+        disabled={loading}
+        className="bg-green-600 text-white px-4 py-2 rounded-lg shadow hover:bg-green-700 disabled:opacity-50"
+      >
+        {loading ? "Анализируем..." : "Анализировать"}
+      </button>
+
+      {error && (
+        <p className="text-red-600 mt-4">⚠ Ошибка: {error}</p>
+      )}
+
+      {result && (
+        <div className="mt-6 p-4 bg-white shadow rounded-lg w-80 text-center">
+          <h2 className="text-xl font-semibold mb-2">
+            Результат анализа
+          </h2>
+          <p>🍽 Еда: <strong>{result.food}</strong></p>
+          <p>🔥 Калории: <strong>{result.calories}</strong></p>
+          <p className="text-gray-500 text-sm mt-2">
+            Файл: {result.filename}
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
-
-async function handleSubmit() {
-if (!file) return
-setLoading(true)
-setError(null)
-const fd = new FormData()
-fd.append('image', file)
-try {
-const res = await fetch('http://130.61.57.107:8000/analyze', {
-method: 'POST',
-body: fd
-})
-if (!res.ok) throw new Error(`Server: ${res.status}`)
-const data = await res.json()
-setResult(data)
-} catch (err) {
-setError(err.message)
-} finally {
-setLoading(false)
-}
-}
-
-
-return (
-<div style={{maxWidth: 720, margin: '24px auto', fontFamily: 'Arial, sans-serif'}}>
-<h1>Calorie Photo — прототип</h1>
-
-
-<div style={{margin: '12px 0'}}>
-<input type="file" accept="image/*" onChange={handleFile} />
-</div>
-
-
-{preview && (
-<div style={{marginBottom: 12}}>
-<img src={preview} alt="preview" style={{maxWidth: '100%'}} />
-</div>
-)}
-
-
-<div>
-<button onClick={handleSubmit} disabled={loading || !file}>
-{loading ? 'Анализ...' : 'Анализировать'}
-</button>
-</div>
-
-
-{error && <div style={{color:'red', marginTop:12}}>Ошибка: {error}</div>}
-
-
-{result && (
-<div style={{marginTop: 16}}>
-<h2>Результат</h2>
-<div>Общая калорийность (оценка): <b>{result.total_calories} kcal</b></div>
-<h3>Детали</h3>
-<ul>
-{result.items.map((it, idx) => (
-<li key={idx}>{it.name} — {it.estimated_calories} kcal — confidence {Math.round(it.confidence*100)}%</li>
-))}
-</ul>
-</div>
-)}
-
-
-</div>
-)
-}
+export default App;

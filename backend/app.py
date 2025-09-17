@@ -1,31 +1,13 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-import io
+from transformers import pipeline
+import requests
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from transformers import AutoImageProcessor, SiglipForImageClassification
-from transformers import AutoFeatureExtractor, AutoModelForImageClassification
-import torch
+# Инициализация FastAPI
+app = FastAPI()
 
-# Загружаем готовую модель (Hugging Face)
-#MODEL_NAME = "nisuga/food_type_classification_model"  # Vision Transformer
-
-#extractor = AutoTokenizer.from_pretrained("MODEL_NAME")
-#model = AutoModelForSequenceClassification.from_pretrained("MODEL_NAME")
-extractor = AutoImageProcessor.from_pretrained("Kaludi/food-category-classification-v2.0")
-model = AutoModelForImageClassification.from_pretrained("Kaludi/food-category-classification-v2.0")
-#model = SiglipForImageClassification.from_pretrained(MODEL_NAME)
-#extractor = AutoFeatureExtractor.from_pretrained(MODEL_NAME)
-#model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
-
-app = FastAPI(
-    title="Zenbody Backend",
-    description="API для анализа еды с фото",
-    version="1.0.0"
-)
-
-# --- CORS ---
+# Настройки CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,42 +16,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-async def root():
-    return {"message": "Zenbody backend is running with ML!"}
+# Hugging Face модель (берём готовый food classifier)
+classifier = pipeline("image-classification", model="nateraw/food")
 
-@app.post("/analyze")
-async def analyze_food(file: UploadFile = File(...)):
-    try:
-        # Читаем изображение
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
+# OpenFoodFacts API
+OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 
-        # Преобразуем для модели
-        inputs = extractor(images=image, return_tensors="pt")
+def fetch_from_off(product_name: str):
+    """Поиск продукта через OpenFoodFacts"""
+    params = {
+        "search_terms": product_name,
+        "search_simple": 1,
+        "action": "process",
+        "json": 1,
+        "page_size": 3,
+    }
+    r = requests.get(OFF_SEARCH_URL, params=params)
+    if r.status_code != 200:
+        return []
+    return r.json().get("products", [])
 
-        with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits
-            predicted_class_id = logits.argmax(-1).item()
-            predicted_label = model.config.id2label[predicted_class_id]
+@app.post("/analyze-image")
+async def analyze_image(file: UploadFile = File(...)):
+    """Загрузка фото, классификация через Hugging Face, поиск данных в OFF"""
+    image = Image.open(file.file).convert("RGB")
+    predictions = classifier(image, top_k=3)
 
-        # 🔥 Тут можно подключить словарь калорийности
-        calories_dict = {
-            "apple": 95,
-            "banana": 105,
-            "orange": 62,
-            "pizza": 285,
-            "cake": 350
-        }
-        calories = calories_dict.get(predicted_label.lower(), "unknown")
+    results = []
+    for pred in predictions:
+        name = pred["label"]
+        score = round(pred["score"] * 100, 2)
 
-        return {
-            "status": "success",
-            "food": predicted_label,
-            "calories": calories,
-            "filename": file.filename
-        }
+        off_results = fetch_from_off(name)
+        results.append({
+            "predicted": name,
+            "confidence": score,
+            "openfoodfacts": [
+                {
+                    "name": p.get("product_name", "Без названия"),
+                    "brand": p.get("brands", "Неизвестно"),
+                    "energy": p.get("nutriments", {}).get("energy-kcal_100g"),
+                    "proteins": p.get("nutriments", {}).get("proteins_100g"),
+                    "carbs": p.get("nutriments", {}).get("carbohydrates_100g"),
+                    "fats": p.get("nutriments", {}).get("fat_100g"),
+                }
+                for p in off_results
+            ]
+        })
 
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    return {"results": results}
