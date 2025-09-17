@@ -5,4 +5,4 @@ pillow
 numpy
 scikit-image
 torch
-transformers
+transformers>=4.36

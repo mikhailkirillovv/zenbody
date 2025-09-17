@@ -3,13 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoImageProcessor, SiglipForImageClassification
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 import torch
 
 # Загружаем готовую модель (Hugging Face)
-MODEL_NAME = "google/vit-base-patch16-224"  # Vision Transformer
-extractor = AutoFeatureExtractor.from_pretrained(MODEL_NAME)
-model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
+#MODEL_NAME = "nisuga/food_type_classification_model"  # Vision Transformer
+
+#extractor = AutoTokenizer.from_pretrained("MODEL_NAME")
+#model = AutoModelForSequenceClassification.from_pretrained("MODEL_NAME")
+extractor = AutoImageProcessor.from_pretrained("Kaludi/food-category-classification-v2.0")
+model = AutoModelForImageClassification.from_pretrained("Kaludi/food-category-classification-v2.0")
+#model = SiglipForImageClassification.from_pretrained(MODEL_NAME)
+#extractor = AutoImageProcessor.from_pretrained(MODEL_NAME, use_auth_token="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")
+#extractor = AutoFeatureExtractor.from_pretrained(MODEL_NAME)
+#model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
 
 app = FastAPI(
     title="Zenbody Backend",
