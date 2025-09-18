@@ -1,35 +1,37 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-from transformers import pipeline
 import requests
+import torch
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-# Инициализация FastAPI
+# --- Инициализация приложения ---
 app = FastAPI()
 
-# Настройки CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # можно ограничить только фронтендом
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Hugging Face модель (берём готовый food classifier)
-classifier = pipeline("image-classification", model="nateraw/food")
+# --- Загружаем ML модель ---
+MODEL_NAME = "Kaludi/food-category-classification-v2.0"
+processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
+model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
 
-# OpenFoodFacts API
+# --- OpenFoodFacts API ---
 OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 
-def fetch_from_off(product_name: str):
-    """Поиск продукта через OpenFoodFacts"""
+def fetch_from_off(product_name: str, top_k: int = 3):
+    """Поиск продукта через OpenFoodFacts API"""
     params = {
         "search_terms": product_name,
         "search_simple": 1,
         "action": "process",
         "json": 1,
-        "page_size": 3,
+        "page_size": top_k,
     }
     r = requests.get(OFF_SEARCH_URL, params=params)
     if r.status_code != 200:
@@ -38,30 +40,32 @@ def fetch_from_off(product_name: str):
 
 @app.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
-    """Загрузка фото, классификация через Hugging Face, поиск данных в OFF"""
+    """Загрузка фото -> ML модель -> поиск в OpenFoodFacts"""
     image = Image.open(file.file).convert("RGB")
-    predictions = classifier(image, top_k=3)
+    inputs = processor(images=image, return_tensors="pt")
 
-    results = []
-    for pred in predictions:
-        name = pred["label"]
-        score = round(pred["score"] * 100, 2)
+    # предсказание
+    with torch.no_grad():
+        outputs = model(**inputs)
+        logits = outputs.logits
+        predicted_class_id = logits.argmax(-1).item()
+        predicted_label = model.config.id2label[predicted_class_id]
 
-        off_results = fetch_from_off(name)
-        results.append({
-            "predicted": name,
-            "confidence": score,
-            "openfoodfacts": [
-                {
-                    "name": p.get("product_name", "Без названия"),
-                    "brand": p.get("brands", "Неизвестно"),
-                    "energy": p.get("nutriments", {}).get("energy-kcal_100g"),
-                    "proteins": p.get("nutriments", {}).get("proteins_100g"),
-                    "carbs": p.get("nutriments", {}).get("carbohydrates_100g"),
-                    "fats": p.get("nutriments", {}).get("fat_100g"),
-                }
-                for p in off_results
-            ]
-        })
+    # поиск в OFF
+    products = fetch_from_off(predicted_label)
 
-    return {"results": results}
+    # формируем ответ
+    return {
+        "predicted_label": predicted_label,
+        "products": [
+            {
+                "name": p.get("product_name", "Без названия"),
+                "brand": p.get("brands", "Неизвестно"),
+                "energy": p.get("nutriments", {}).get("energy-kcal_100g"),
+                "proteins": p.get("nutriments", {}).get("proteins_100g"),
+                "carbs": p.get("nutriments", {}).get("carbohydrates_100g"),
+                "fats": p.get("nutriments", {}).get("fat_100g"),
+            }
+            for p in products
+        ]
+    }
