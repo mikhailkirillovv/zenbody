@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import requests
 import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
+from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 # --- Инициализация приложения ---
@@ -17,9 +20,37 @@ app.add_middleware(
 )
 
 # --- Загружаем ML модель ---
-MODEL_NAME = "Kaludi/food-category-classification-v2.0"
-processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
-model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
+MODEL_PATH = "best_convnext_food101.pth"
+CALORIES_PATH = "calories.json"
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# ======================
+# 2. Загружаем чекпоинт
+# ======================
+checkpoint = torch.load(MODEL_PATH, map_location=device)
+
+# Извлекаем классы из модели
+classes = checkpoint["classes"]
+
+# ======================
+# 4. Восстанавливаем модель
+# ======================
+num_classes = len(classes)
+model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
+model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_classes)
+model.load_state_dict(checkpoint["model_state_dict"])
+model.eval()
+model.to(device)
+
+# ======================
+# 5. Трансформации
+# ======================
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
 
 # --- OpenFoodFacts API ---
 OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
@@ -42,7 +73,7 @@ def fetch_from_off(product_name: str, top_k: int = 3):
 async def analyze_image(file: UploadFile = File(...)):
     """Загрузка фото -> ML модель -> поиск в OpenFoodFacts"""
     image = Image.open(file.file).convert("RGB")
-    inputs = processor(images=image, return_tensors="pt")
+    inputs = transform(image).unsqueeze(0)  # batch dimension
 
     # предсказание
     with torch.no_grad():
