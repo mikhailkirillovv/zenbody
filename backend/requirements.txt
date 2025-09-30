@@ -6,3 +6,4 @@ numpy
 scikit-image
 torch
 transformers>=4.36
+torchvision

@@ -4,7 +4,8 @@ from PIL import Image
 import requests
 import torch
 import torch.nn as nn
-import torchvision.transforms as transforms
+import torchvision
+from torchvision import models, transforms
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
@@ -20,7 +21,7 @@ app.add_middleware(
 )
 
 # --- Загружаем ML модель ---
-MODEL_PATH = "best_convnext_food101.pth"
+MODEL_PATH = "/home/opc/models/best_convnext_food101.pth"
 CALORIES_PATH = "calories.json"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -77,12 +78,12 @@ async def analyze_image(file: UploadFile = File(...)):
 
     # предсказание
     with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-        predicted_class_id = logits.argmax(-1).item()
-        predicted_label = model.config.id2label[predicted_class_id]
+        outputs = model(inputs)
+        #logits = outputs.logits
+        predicted_class_id = outputs.argmax(1).item()
+        predicted_label = classes[predicted_class_id]
 
-    # поиск в OFF
+    # поиск в OFF 
     products = fetch_from_off(predicted_label)
 
     # формируем ответ
