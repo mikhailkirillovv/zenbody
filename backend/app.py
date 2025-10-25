@@ -4,10 +4,12 @@ from PIL import Image
 import requests
 import torch
 import torch.nn as nn
+#import torch.optim as optim
 import torchvision
 from torchvision import models, transforms
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+#from torch.utils.data import DataLoader, random_split
+#from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 # --- Инициализация приложения ---
 app = FastAPI()
@@ -21,7 +23,7 @@ app.add_middleware(
 )
 
 # --- Загружаем ML модель ---
-MODEL_PATH = "/home/opc/models/best_convnext_food101.pth"
+MODEL_PATH = "best_convnext_food101_15.pth"
 CALORIES_PATH = "calories.json"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +31,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # 2. Загружаем чекпоинт
 # ======================
 checkpoint = torch.load(MODEL_PATH, map_location=device)
-
+# Восстанавливаем веса модели
+# model.load_state_dict(checkpoint["model_state_dict"])
 # Извлекаем классы из модели
 classes = checkpoint["classes"]
 
