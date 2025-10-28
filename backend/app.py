@@ -61,6 +61,7 @@ OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 
 def fetch_from_off(product_name: str, top_k: int = 3):
     """Поиск продукта через OpenFoodFacts API"""
+    product_name = product_name.replace("_", " ")
     params = {
         "search_terms": product_name,
         "search_simple": 1,
