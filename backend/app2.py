@@ -1,75 +1,107 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-import io
-
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from transformers import AutoImageProcessor, SiglipForImageClassification
-from transformers import AutoFeatureExtractor, AutoModelForImageClassification
+import requests
 import torch
+import torch.nn as nn
+#import torch.optim as optim
+import torchvision
+from torchvision import models, transforms
+from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
+#from torch.utils.data import DataLoader, random_split
+#from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-# Загружаем готовую модель (Hugging Face)
-#MODEL_NAME = "nisuga/food_type_classification_model"  # Vision Transformer
+# --- Инициализация приложения ---
+app = FastAPI()
 
-#extractor = AutoTokenizer.from_pretrained("MODEL_NAME")
-#model = AutoModelForSequenceClassification.from_pretrained("MODEL_NAME")
-extractor = AutoImageProcessor.from_pretrained("Kaludi/food-category-classification-v2.0")
-model = AutoModelForImageClassification.from_pretrained("Kaludi/food-category-classification-v2.0")
-#model = SiglipForImageClassification.from_pretrained(MODEL_NAME)
-#extractor = AutoFeatureExtractor.from_pretrained(MODEL_NAME)
-#model = AutoModelForImageClassification.from_pretrained(MODEL_NAME)
-
-app = FastAPI(
-    title="Zenbody Backend",
-    description="API для анализа еды с фото",
-    version="1.0.0"
-)
-
-# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # можно ограничить только фронтендом
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/")
-async def root():
-    return {"message": "Zenbody backend is running with ML!"}
+# --- Загружаем ML модель ---
+MODEL_PATH = "best_convnext_food101_15.pth"
+CALORIES_PATH = "calories.json"
 
-@app.post("/analyze")
-async def analyze_food(file: UploadFile = File(...)):
-    try:
-        # Читаем изображение
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# ======================
+# 2. Загружаем чекпоинт
+# ======================
+checkpoint = torch.load(MODEL_PATH, map_location=device)
+# Восстанавливаем веса модели
+# model.load_state_dict(checkpoint["model_state_dict"])
+# Извлекаем классы из модели
+classes = checkpoint["classes"]
 
-        # Преобразуем для модели
-        inputs = extractor(images=image, return_tensors="pt")
+# ======================
+# 4. Восстанавливаем модель
+# ======================
+num_classes = len(classes)
+model = convnext_tiny(weights=ConvNeXt_Tiny_Weights.IMAGENET1K_V1)
+model.classifier[2] = nn.Linear(model.classifier[2].in_features, num_classes)
+model.load_state_dict(checkpoint["model_state_dict"])
+model.eval()
+model.to(device)
 
-        with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits
-            predicted_class_id = logits.argmax(-1).item()
-            predicted_label = model.config.id2label[predicted_class_id]
+# ======================
+# 5. Трансформации
+# ======================
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
 
-        # 🔥 Тут можно подключить словарь калорийности
-        calories_dict = {
-            "apple": 95,
-            "banana": 105,
-            "orange": 62,
-            "pizza": 285,
-            "cake": 350
-        }
-        calories = calories_dict.get(predicted_label.lower(), "unknown")
+# --- OpenFoodFacts API ---
+OFF_SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 
-        return {
-            "status": "success",
-            "food": predicted_label,
-            "calories": calories,
-            "filename": file.filename
-        }
+def fetch_from_off(product_name: str, top_k: int = 3):
+    """Поиск продукта через OpenFoodFacts API"""
+    product_name = product_name.replace("_", " ")
+    params = {
+        "search_terms": product_name,
+        "search_simple": 1,
+        "action": "process",
+        "json": 1,
+        "page_size": top_k,
+    }
+    r = requests.get(OFF_SEARCH_URL, params=params)
+    if r.status_code != 200:
+        return []
+    return r.json().get("products", [])
 
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+@app.post("/analyze-image")
+async def analyze_image(file: UploadFile = File(...)):
+    """Загрузка фото -> ML модель -> поиск в OpenFoodFacts"""
+    image = Image.open(file.file).convert("RGB")
+    inputs = transform(image).unsqueeze(0)  # batch dimension
+
+    # предсказание
+    with torch.no_grad():
+        outputs = model(inputs)
+        #logits = outputs.logits
+        predicted_class_id = outputs.argmax(1).item()
+        predicted_label = classes[predicted_class_id]
+
+    # поиск в OFF 
+    products = fetch_from_off(predicted_label)
+
+    # формируем ответ
+    return {
+        "predicted_label": predicted_label,
+        "products": [
+            {
+                "name": p.get("product_name", "Без названия"),
+                "brand": p.get("brands", "Неизвестно"),
+                "energy": p.get("nutriments", {}).get("energy-kcal_100g"),
+                "proteins": p.get("nutriments", {}).get("proteins_100g"),
+                "carbs": p.get("nutriments", {}).get("carbohydrates_100g"),
+                "fats": p.get("nutriments", {}).get("fat_100g"),
+            }
+            for p in products
+        ]
+    }
